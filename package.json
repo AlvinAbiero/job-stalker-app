@@ -1,0 +1,29 @@
+{
+  "name": "job-stalker-app",
+  "version": "1.0.0",
+  "description": "Implementation of  a **Job Stalker App** using express.js, Typescript and puppeteer, where the user enters the URL for someone's profile on LinkedIn and then the web application extracts data from the LinkedIn profile and presents them to the user to determine if the candidate is worth or not.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node dist/server.js",
+    "dev": "nodemon src/server.ts",
+    "build": "tsc"
+  },
+  "keywords": [],
+  "author": "Alvin Abiero",
+  "license": "ISC",
+  "dependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.15.3",
+    "@types/puppeteer": "^5.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0",
+    "puppeteer": "^24.7.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
