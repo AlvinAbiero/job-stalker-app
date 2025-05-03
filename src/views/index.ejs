@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <!-- Add Bootstrap for styling -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="container mt-5">
+      <div class="row">
+        <div class="col-md-8 offset-md-2">
+          <div class="card">
+            <div class="card-header bg-primary text-white">
+              <h1 class="text-center">Job Stalker App</h1>
+            </div>
+            <div class="card-body">
+              <p class="lead text-center">
+                Enter a LinkedIn profile URL to analyze the candidate's
+                potential.
+              </p>
+
+              <% if (typeof error !== 'undefined') { %>
+              <div class="alert alert-danger" role="alert"><%= error %></div>
+              <% } %>
+
+              <form action="/scrape" method="POST" class="mt-4">
+                <div class="mb-3">
+                  <label for="linkedinUrl" class="form-label"
+                    >LinkedIn Profile URL:</label
+                  >
+                  <input
+                    type="url"
+                    class="form-control"
+                    id="linkedinUrl"
+                    name="linkedinUrl"
+                    placeholder="https://www.linkedin.com/in/username/"
+                    required
+                  />
+                  <div class="form-text">
+                    Example: https://www.linkedin.com/in/username/
+                  </div>
+                </div>
+                <div class="d-grid gap-2">
+                  <button type="submit" class="btn btn-primary">
+                    Analyze Profile
+                  </button>
+                </div>
+              </form>
+            </div>
+            <div class="card-footer text-muted text-center">
+              <p>
+                Note: This application is for educational purposes only. Please
+                respect LinkedIn's terms of service and privacy policies.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/main.js"></script>
+  </body>
+</html>
