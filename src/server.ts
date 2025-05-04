@@ -2,6 +2,8 @@ import express from "express";
 import dotenv from "dotenv";
 import path from "path";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import session from "express-session";
 import routes from "./routes";
 import { basicAuth } from "./middlewares";
@@ -11,6 +13,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(helmet());
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -32,11 +35,20 @@ app.use(
 // Basic authentication middleware (if enabled)
 app.use(basicAuth);
 
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many requests from this IP, please try again after 15 minutes",
+});
+
 // set view engine and views directory
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
-app.use("/", routes);
+app.use("/", apiLimiter);
+app.use("/linkedin", routes);
 
 // Error handling middleware
 app.use(

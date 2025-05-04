@@ -39,14 +39,21 @@ interface LinkedInCredentials {
  * Enhanced LinkedIn profile scraper
  * Includes options for login if needed
  */
-export async function scrapeProfileWithLogin(
+export async function scrapeProfile(
   url: string,
   credentials?: LinkedInCredentials
 ): Promise<ProfileData> {
   // Launch browser
   const browser = await puppeteer.launch({
     headless: process.env.HEADLESS !== "false", // Convert string to boolean
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage", // Add this to avoid issues in Docker/CI environments
+      "--disable-accelerated-2d-canvas", // Improve performance
+      "--disable-gpu", // Improve performance
+      "--window-size=1920,1080", // Set window size,
+    ],
     defaultViewport: { width: 1280, height: 800 },
   });
 
@@ -58,14 +65,78 @@ export async function scrapeProfileWithLogin(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     );
 
+    // Set longer timeout for navigation (60 seconds instead of default 30)
+    const navigationTimeout = 60000; // 60 seconds
+
+    // Set extra HTTP headers to appear more like a regular browser
+    await page.setExtraHTTPHeaders({
+      "Accept-Language": "en-US,en;q=0.9",
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+      Connection: "keep-alive",
+      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1",
+    });
+
+    // Enable request interception to disable images and other resources
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      const resourceType = req.resourceType();
+      if (
+        resourceType === "image" ||
+        resourceType === "font" ||
+        resourceType === "media"
+      ) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
+    console.log(`Navigating to LinkedIn profile: ${url}`);
+
     // Navigate to LinkedIn profile
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+    try {
+      await page.goto(url, {
+        waitUntil: "networkidle2",
+        timeout: navigationTimeout,
+      });
+    } catch (error) {
+      console.log(
+        "Navigation timeout or error. Trying with 'domcontentloaded' strategy..."
+      );
+      // If networkidle2 fails, try with just domcontentloaded
+      await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: navigationTimeout,
+      });
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Check if LinkedIn is showing a CAPTCHA or security verification
+    const hasCaptcha = await page.evaluate(() => {
+      return (
+        document.body.textContent?.includes("Security Verification") ||
+        document.body.textContent?.includes("CAPTCHA") ||
+        document.body.textContent?.includes("Please verify")
+      );
+    });
+
+    if (hasCaptcha) {
+      throw new Error(
+        "LinkedIn is requesting CAPTCHA verification. Try again later or use a different IP address."
+      );
+    }
 
     // Check if login is required
     const loginRequired = await page.evaluate(() => {
       return (
         document.querySelector(
-          ".authwall-join-form, .authentication-outlet"
+          ".authwall-join-form, .authentication-outlet, .org-login"
         ) !== null
       );
     });
@@ -77,6 +148,7 @@ export async function scrapeProfileWithLogin(
       // Navigate to login page
       await page.goto("https://www.linkedin.com/login", {
         waitUntil: "networkidle2",
+        timeout: navigationTimeout,
       });
 
       // Fill in login form
@@ -85,7 +157,10 @@ export async function scrapeProfileWithLogin(
 
       // Click login button
       await Promise.all([
-        page.waitForNavigation({ waitUntil: "networkidle2" }),
+        page.waitForNavigation({
+          waitUntil: "networkidle2",
+          timeout: navigationTimeout,
+        }),
         page.click(".login__form_action_container button"),
       ]);
 
@@ -99,7 +174,10 @@ export async function scrapeProfileWithLogin(
       }
 
       // Navigate back to the profile URL
-      await page.goto(url, { waitUntil: "networkidle2" });
+      await page.goto(url, {
+        waitUntil: "networkidle2",
+        timeout: navigationTimeout,
+      });
     } else if (loginRequired && !credentials) {
       throw new Error(
         "This profile requires login, but no credentials were provided."
@@ -108,7 +186,7 @@ export async function scrapeProfileWithLogin(
 
     // Wait for profile content to load
     await page
-      .waitForSelector(".pv-top-card", { timeout: 10000 })
+      .waitForSelector(".pv-top-card", { timeout: 15000 })
       .catch(() =>
         console.log("Could not find main profile section, but continuing...")
       );
@@ -255,7 +333,7 @@ export async function scrapeProfileWithLogin(
       try {
         // Try to click "Show more skills" button if it exists
         const showMoreButton = await page.$(
-          "button.pv-skills-section__additional-skills"
+          "button.pv-skills-section__additional-skills, .pvs-list__footer-action"
         );
         if (showMoreButton) {
           await showMoreButton.click();
@@ -264,7 +342,7 @@ export async function scrapeProfileWithLogin(
           // Extract skills again
           const skills = await page.evaluate(() => {
             const skillElements = document.querySelectorAll(
-              ".pv-skill-category-entity__name"
+              ".pv-skill-category-entity__name, .pvs-entity--padded"
             );
             return Array.from(skillElements)
               .map((element) => element.textContent?.trim())
@@ -281,12 +359,40 @@ export async function scrapeProfileWithLogin(
     }
 
     // Take a screenshot for debugging if needed
+    // Take a screenshot for debugging if needed
     if (process.env.NODE_ENV === "development") {
-      await page.screenshot({ path: `screenshots/${Date.now()}_profile.png` });
+      const screenshotDir = process.env.SCREENSHOT_DIR || "screenshots";
+      await page.screenshot({
+        path: `${screenshotDir}/${Date.now()}_profile.png`,
+      });
     }
 
     // Close the browser
     await browser.close();
+
+    // Fill in default values if any section is missing or empty
+    if (!profileData.name || profileData.name === "Not found") {
+      // If we can't get the name, the scrape probably failed
+      throw new Error(
+        "Could not scrape the profile data. The profile might be private or LinkedIn's structure has changed."
+      );
+    }
+
+    if (!profileData.experience || profileData.experience.length === 0) {
+      profileData.experience = [
+        { title: "Not found", company: "Not found", duration: "Not found" },
+      ];
+    }
+
+    if (!profileData.education || profileData.education.length === 0) {
+      profileData.education = [
+        { school: "Not found", degree: "Not found", years: "Not found" },
+      ];
+    }
+
+    if (!profileData.skills || profileData.skills.length === 0) {
+      profileData.skills = ["Not found"];
+    }
 
     // Calculate profile score and analysis
     const { score, analysis } = calculateProfileScore(profileData);

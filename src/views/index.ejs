@@ -29,7 +29,7 @@
               <div class="alert alert-danger" role="alert"><%= error %></div>
               <% } %>
 
-              <form action="/scrape" method="POST" class="mt-4">
+              <form action="/linkedin/scrape" method="POST" class="mt-4">
                 <div class="mb-3">
                   <label for="linkedinUrl" class="form-label"
                     >LinkedIn Profile URL:</label
@@ -44,6 +44,28 @@
                   />
                   <div class="form-text">
                     Example: https://www.linkedin.com/in/username/
+                  </div>
+                  <div class="d-flex flex-column gap-2">
+                    <!-- Optional credentials fields -->
+                    <h3 class="mb-2">LinkedIn Credentials (Optional)</h3>
+                    <label for="linkedin-email" class="form-label"
+                      >Email:</label
+                    >
+                    <input
+                      type="email"
+                      class="form-control"
+                      name="credentials[email]"
+                      placeholder="LinkedIn Email"
+                    />
+                    <label for="linkedin-password" class="form-label"
+                      >Password:</label
+                    >
+                    <input
+                      type="password"
+                      class="form-control"
+                      name="credentials[password]"
+                      placeholder="LinkedIn Password"
+                    />
                   </div>
                 </div>
                 <div class="d-grid gap-2">

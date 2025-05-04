@@ -20,14 +20,30 @@ export const basicAuth = (
   if (!authHeader) {
     res.setHeader("WWW-Authenticate", "Basic");
     res.status(401).send("Authentication required.");
+    return;
   }
 
   // basic auth format: Basic <base64(username:password)
   const base64Credentials = authHeader.split(" ")[1];
+
+  // Handle case where format might be invalid
+  if (!base64Credentials) {
+    res.setHeader("WWW-Authenticate", "Basic");
+    res.status(401).send("Invalid authorization format.");
+    return;
+  }
+
   const credentials = Buffer.from(base64Credentials, "base64").toString(
     "ascii"
   );
   const [username, password] = credentials.split(":");
+
+  // check if credentials are properly formatted
+  if (!username || !password) {
+    res.setHeader("WWW-Authenticate", "Basic");
+    res.status(401).send("Invalid credentials format.");
+    return;
+  }
 
   // check credentials against environment variables
   const validUsername = process.env.BASIC_AUTH_USERNAME;

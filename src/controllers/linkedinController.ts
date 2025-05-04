@@ -1,325 +1,162 @@
-// src/services/enhancedScraperService.ts
-import puppeteer from "puppeteer";
-import dotenv from "dotenv";
-import { calculateProfileScore } from "../utils/helpers";
+import { Request, Response } from "express";
+import { scrapeProfile } from "../services/scraper.service";
+import { validationResult } from "express-validator";
 
-dotenv.config();
+export const getHomePage = (_req: Request, res: Response) => {
+  res.render("index", { title: "Job Stalker App" });
+};
 
-// This should match the expected interface in ../utils/helpers.ts
-interface LinkedInProfile {
-  name: string;
-  headline: string;
-  location: string;
-  summary: string;
-  about: string; // Added to match the expected interface
-  experience: ExperienceItem[];
-  education: EducationItem[];
-  skills: string[];
-  recommendations: number;
-  connections: string; // Added to match the expected interface
-  score?: number;
-  analysis?: string;
-}
+export const scrapeLinkedInProfile = async (req: Request, res: Response) => {
+  try {
+    // Check validation errors if express-validator is used
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.render("index", {
+        title: "Job Stalker App",
+        error: errors.array()[0].msg,
+      });
+    }
 
-interface ExperienceItem {
-  title: string;
-  company: string;
-  duration: string;
-}
+    const { linkedinUrl } = req.body;
 
-interface EducationItem {
-  school: string;
-  degree: string;
-  years: string;
-}
+    if (!linkedinUrl) {
+      return res.render("index", {
+        title: "Job Stalker App",
+        error: "Please provide a LinkedIn URL",
+      });
+    }
 
-interface LinkedInCredentials {
-  email: string;
-  password: string;
-}
+    // Validate if the URL is a linkedIn profile URL
+    if (!linkedinUrl.includes("linkedin.com/in/")) {
+      return res.render("index", {
+        title: "Job Stalker App",
+        error: "Please provide a valid LinkedIn profile URL",
+      });
+    }
+
+    console.log(`Scraping LinkedIn Profile: ${linkedinUrl}`);
+
+    // optional Login credentials
+    const credentials = req.body.credentials
+      ? {
+          email: req.body.credentials.email,
+          password: req.body.credentials.password,
+        }
+      : undefined;
+
+    // For now, use environment variables for credentials if needed
+    // const credentials =
+    //   process.env.LINKEDIN_EMAIL && process.env.LINKEDIN_PASSWORD
+    //     ? {
+    //         email: process.env.LINKEDIN_EMAIL,
+    //         password: process.env.LINKEDIN_PASSWORD,
+    //       }
+    //     : undefined;
+
+    // Set a longer timeout for the client response (5 minutes)
+    req.setTimeout(300000); // 5 minutes in milliseconds
+
+    const profileData = await scrapeProfile(linkedinUrl, credentials);
+
+    res.render("result", {
+      title: "Profile Analysis",
+      profile: profileData,
+    });
+  } catch (error: any) {
+    console.error("Error scraping profile:", error);
+    // Determine the appropriate error message
+    let errorMessage =
+      "An error occurred while scraping the profile. Please try again.";
+
+    if (error.message?.includes("timeout")) {
+      errorMessage =
+        "The request timed out. LinkedIn might be blocking automated access or the profile is too large. Please try again later.";
+    } else if (
+      error.message?.includes("CAPTCHA") ||
+      error.message?.includes("Security Verification")
+    ) {
+      errorMessage =
+        "LinkedIn is requesting CAPTCHA verification. Please try again later or use different credentials.";
+    } else if (error.message?.includes("requires login")) {
+      errorMessage =
+        "This profile requires login. Please configure LinkedIn credentials in your .env file.";
+    } else if (error.message?.includes("check your credentials")) {
+      errorMessage =
+        "Invalid LinkedIn credentials. Please check your credentials in the .env file.";
+    } else if (error.message?.includes("Could not scrape")) {
+      errorMessage =
+        "Could not scrape the profile data. The profile might be private or LinkedIn's structure has changed.";
+    }
+
+    res.render("index", {
+      title: "Job Stalker App",
+      error: errorMessage,
+    });
+  }
+};
 
 /**
- * Enhanced LinkedIn profile scraper
- * Includes options for login if needed
+ * API endpoint to get LinkedIn profile data (JSON response)
  */
-async function scrapeProfile(
-  url: string,
-  credentials?: LinkedInCredentials
-): Promise<LinkedInProfile> {
-  // Launch browser
-  const browser = await puppeteer.launch({
-    headless: process.env.HEADLESS !== "false", // Convert string to boolean
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    defaultViewport: { width: 1280, height: 800 },
-  });
 
-  const page = await browser.newPage();
-
+export const getLinkedInProfileApI = async (req: Request, res: Response) => {
   try {
-    // Set user agent to avoid detection
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    );
-
-    // Navigate to LinkedIn profile
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-
-    // Check if login is required
-    const loginRequired = await page.evaluate(() => {
-      return (
-        document.querySelector(
-          ".authwall-join-form, .authentication-outlet"
-        ) !== null
-      );
-    });
-
-    // Handle login if required and credentials are provided
-    if (loginRequired && credentials) {
-      console.log("Login required. Attempting to log in...");
-
-      // Navigate to login page
-      await page.goto("https://www.linkedin.com/login", {
-        waitUntil: "networkidle2",
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({
+        success: false,
+        errors: errors.array(),
       });
+      return;
+    }
 
-      // Fill in login form
-      await page.type("#username", credentials.email);
-      await page.type("#password", credentials.password);
+    const url = req.params.url || req.body.linkedinUrl;
 
-      // Click login button
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: "networkidle2" }),
-        page.click(".login__form_action_container button"),
-      ]);
-
-      // Check if login was successful
-      const loginSuccessful = await page.evaluate(() => {
-        return document.querySelector(".feed-identity-module") !== null;
+    if (!url) {
+      res.status(400).json({
+        success: false,
+        error: "LinkedIn URL is required",
       });
-
-      if (!loginSuccessful) {
-        throw new Error("Login failed. Please check your credentials.");
-      }
-
-      // Navigate back to the profile URL
-      await page.goto(url, { waitUntil: "networkidle2" });
-    } else if (loginRequired && !credentials) {
-      throw new Error(
-        "This profile requires login, but no credentials were provided."
-      );
+      return;
     }
 
-    // Wait for profile content to load
-    await page
-      .waitForSelector(".pv-top-card", { timeout: 10000 })
-      .catch(() =>
-        console.log("Could not find main profile section, but continuing...")
-      );
-
-    // Extract profile data with better selectors and fallbacks
-    const profileData = await page.evaluate(() => {
-      // Helper function to safely get text content
-      const getText = (selector: string, fallback = "Not found") => {
-        const element = document.querySelector(selector);
-        return element ? element.textContent?.trim() || fallback : fallback;
-      };
-
-      // Find section by heading text
-      const findSectionByHeading = (headingText: string) => {
-        const headings = Array.from(
-          document.querySelectorAll("section h2, section h3")
-        );
-        for (const heading of headings) {
-          if (heading.textContent?.includes(headingText)) {
-            return heading.closest("section");
-          }
+    // Optional login credentials
+    const credentials = req.body.credentials
+      ? {
+          email: req.body.credentials.email,
+          password: req.body.credentials.password,
         }
-        return null;
-      };
+      : undefined;
 
-      // Basic info with multiple selector attempts
-      const name = getText(
-        '.text-heading-xlarge, .pv-top-card-section__name, [data-generated-cea-title="name"]'
-      );
-      const headline = getText(
-        '.text-body-medium, .pv-top-card-section__headline, [data-generated-cea-line1="headline"]'
-      );
-      const locationElement = document.querySelector(
-        '.text-body-small.inline.t-black--light.break-words, .pv-top-card-section__location, [data-generated-cea-line2="location"]'
-      );
-      const location = locationElement
-        ? locationElement.textContent?.trim() || "Not found"
-        : "Not found";
+    // Scrape the profile
+    const profileData = await scrapeProfile(url, credentials);
 
-      // Summary (About section)
-      const summarySection = findSectionByHeading("About");
-      const summary = summarySection
-        ? getText(
-            ".display-flex.ph5.pv3 div, .pv-about__summary-text",
-            "No summary found"
-          )
-        : "No summary found";
-
-      // Experience
-      const experienceItems: {
-        title: string;
-        company: string;
-        duration: string;
-      }[] = [];
-      const experienceSection = findSectionByHeading("Experience");
-
-      if (experienceSection) {
-        const expElements = experienceSection.querySelectorAll(
-          "li.artdeco-list__item, .pv-entity__position-group"
-        );
-
-        expElements.forEach((element) => {
-          const title = getText(
-            'span.mr1.t-bold, .pv-entity__summary-info h3, [data-field="title"]',
-            "Unknown role"
-          );
-          const company = getText(
-            'span.t-14.t-normal, .pv-entity__secondary-title, [data-field="company_name"]',
-            "Unknown company"
-          );
-          const duration = getText(
-            'span.t-14.t-normal.t-black--light, .pv-entity__date-range span:nth-child(2), [data-field="date_range"]',
-            "Unknown duration"
-          );
-
-          experienceItems.push({ title, company, duration });
-        });
-      }
-
-      // Education
-      const educationItems: {
-        school: string;
-        degree: string;
-        years: string;
-      }[] = [];
-      const educationSection = findSectionByHeading("Education");
-
-      if (educationSection) {
-        const eduElements = educationSection.querySelectorAll(
-          "li.artdeco-list__item, .pv-education-entity"
-        );
-
-        eduElements.forEach((element) => {
-          const school = getText(
-            'div.t-bold, .pv-entity__school-name, [data-field="school_name"]',
-            "Unknown school"
-          );
-          const degree = getText(
-            'span.t-14.t-normal, .pv-entity__degree-name span:nth-child(2), [data-field="degree_name"]',
-            "Unknown degree"
-          );
-          const years = getText(
-            'span.t-14.t-normal.t-black--light, .pv-entity__dates span:nth-child(2), [data-field="date_range"]',
-            "Unknown years"
-          );
-
-          educationItems.push({ school, degree, years });
-        });
-      }
-
-      // Skills
-      const skills: string[] = [];
-      const skillsSection = findSectionByHeading("Skills");
-
-      if (skillsSection) {
-        const skillElements = skillsSection.querySelectorAll(
-          'span.display-block.t-black--light.t-14, .pv-skill-category-entity__name, [data-field="skill_name"]'
-        );
-
-        skillElements.forEach((element) => {
-          const skill = element.textContent?.trim();
-          if (skill) skills.push(skill);
-        });
-      }
-
-      // Recommendations
-      const recommendationsSection = findSectionByHeading("Recommendations");
-
-      let recommendations = 0;
-      if (recommendationsSection) {
-        const recommendationsText = recommendationsSection.textContent || "";
-        const match = recommendationsText.match(/(\d+)\s+recommendation/);
-        if (match && match[1]) {
-          recommendations = parseInt(match[1], 10);
-        }
-      }
-
-      // Get connections
-      const connectionsText = getText(
-        ".pv-top-card--list-bullet li, .pv-top-card__connections",
-        "0 connections"
-      );
-
-      return {
-        name,
-        headline,
-        location,
-        summary,
-        about: summary, // Using summary as about since they're typically the same
-        experience: experienceItems,
-        education: educationItems,
-        skills,
-        recommendations,
-        connections: connectionsText,
-      };
+    // Return JSON response
+    res.status(200).json({
+      success: true,
+      data: profileData,
     });
+  } catch (error: any) {
+    console.error("Error fetching LinkedIn profile:", error);
 
-    // Retry getting skills if it was empty (sometimes skills need to be expanded)
-    if (profileData.skills.length === 0) {
-      try {
-        // Try to click "Show more skills" button if it exists
-        const showMoreButton = await page.$(
-          "button.pv-skills-section__additional-skills"
-        );
-        if (showMoreButton) {
-          await showMoreButton.click();
-          await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait for animation
-
-          // Extract skills again
-          const skills = await page.evaluate(() => {
-            const skillElements = document.querySelectorAll(
-              ".pv-skill-category-entity__name"
-            );
-            return Array.from(skillElements)
-              .map((element) => element.textContent?.trim())
-              .filter(Boolean) as string[];
-          });
-
-          if (skills.length > 0) {
-            profileData.skills = skills;
-          }
-        }
-      } catch (error) {
-        console.log("Could not expand skills section:", error);
-      }
+    // Determine appropriate error status
+    let statusCode = 500;
+    if (
+      error.message?.includes("requires login") ||
+      error.message?.includes("check your credentials")
+    ) {
+      statusCode = 401;
+    } else if (
+      error.message?.includes("not found") ||
+      error.message?.includes("could not find")
+    ) {
+      statusCode = 404;
     }
 
-    // Take a screenshot for debugging if needed
-    if (process.env.NODE_ENV === "development") {
-      await page.screenshot({ path: `screenshots/${Date.now()}_profile.png` });
-    }
-
-    // Close the browser
-    await browser.close();
-
-    // Calculate profile score and analysis
-    const { score, analysis } = calculateProfileScore(profileData);
-
-    return {
-      ...profileData,
-      score,
-      analysis,
-    };
-  } catch (error) {
-    console.error("Error during enhanced scraping:", error);
-    await browser.close();
-    throw error;
+    res.status(statusCode).json({
+      success: false,
+      error: error.message || "Failed to fetch LinkedIn profile",
+    });
   }
-}
-
-export default scrapeProfile;
+};
